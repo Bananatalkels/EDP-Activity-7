@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Password Recovery — Firearm Registry</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600&display=swap" rel="stylesheet"/>
+  <script src="db.js"></script>
+  <style>
+    :root { --brand:#1d4ed8; --accent:#f59e0b; --dark:#0f172a; --surface:#1e293b; --text:#e2e8f0; --muted:#64748b; }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body {
+      font-family:'IBM Plex Sans',sans-serif;
+      background:var(--dark);
+      min-height:100vh;
+      display:flex; align-items:center; justify-content:center;
+      overflow:hidden;
+    }
+    body::before {
+      content:'';
+      position:fixed; inset:0;
+      background-image:
+        linear-gradient(rgba(29,78,216,.07) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(29,78,216,.07) 1px, transparent 1px);
+      background-size:40px 40px;
+      animation:gridShift 20s linear infinite;
+      pointer-events:none;
+    }
+    @keyframes gridShift { to { background-position:40px 40px; } }
+
+    .card {
+      background:var(--surface);
+      border:1px solid rgba(245,158,11,.25);
+      border-radius:4px;
+      width:420px;
+      padding:48px 40px;
+      position:relative;
+      box-shadow:0 0 60px rgba(245,158,11,.08);
+      animation:fadeUp .5s ease both;
+    }
+    @keyframes fadeUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
+    .card::before {
+      content:''; position:absolute; top:-1px; left:-1px;
+      width:40px; height:40px;
+      border-top:2px solid var(--accent); border-left:2px solid var(--accent);
+    }
+    .card::after {
+      content:''; position:absolute; bottom:-1px; right:-1px;
+      width:40px; height:40px;
+      border-bottom:2px solid var(--accent); border-right:2px solid var(--accent);
+    }
+
+    .page-header { margin-bottom:32px; }
+    .page-header h2 {
+      font-family:'Bebas Neue',sans-serif;
+      font-size:28px; letter-spacing:3px; color:var(--text);
+    }
+    .page-header p { font-size:13px; color:var(--muted); margin-top:4px; line-height:1.5; }
+
+    /* Step indicator */
+    .steps {
+      display:flex; gap:0; margin-bottom:32px;
+    }
+    .step {
+      flex:1; text-align:center; padding:8px 0;
+      font-family:'IBM Plex Mono',monospace;
+      font-size:10px; letter-spacing:1px;
+      color:var(--muted);
+      border-bottom:2px solid rgba(100,116,139,.3);
+      transition:all .3s;
+    }
+    .step.active { color:var(--accent); border-color:var(--accent); }
+    .step.done   { color:#22c55e; border-color:#22c55e; }
+
+    label {
+      display:block; font-size:11px; font-weight:600;
+      letter-spacing:1.5px; text-transform:uppercase;
+      color:var(--muted); margin-bottom:6px;
+    }
+    input {
+      width:100%;
+      background:var(--dark);
+      border:1px solid rgba(100,116,139,.4);
+      border-radius:2px;
+      padding:10px 14px;
+      color:var(--text);
+      font-family:'IBM Plex Mono',monospace;
+      font-size:14px;
+      outline:none;
+      transition:border-color .2s;
+    }
+    input:focus { border-color:var(--accent); }
+    .field { margin-bottom:20px; }
+
+    .btn-primary {
+      width:100%;
+      background:var(--accent);
+      color:var(--dark);
+      font-family:'Bebas Neue',sans-serif;
+      font-size:18px; letter-spacing:3px;
+      padding:12px; border:none; border-radius:2px;
+      cursor:pointer; transition:background .2s, transform .1s;
+      margin-top:8px;
+    }
+    .btn-primary:hover { background:#d97706; }
+    .btn-primary:active { transform:scale(.98); }
+
+    .links { text-align:center; margin-top:20px; font-size:12px; color:var(--muted); }
+    .links a { color:var(--brand); text-decoration:none; font-weight:600; }
+    .links a:hover { text-decoration:underline; }
+
+    .alert { padding:10px 14px; border-radius:2px; font-size:13px; margin-bottom:20px; display:none; }
+    .alert-error  { background:rgba(239,68,68,.15); border:1px solid rgba(239,68,68,.4); color:#fca5a5; }
+    .alert-success{ background:rgba(34,197,94,.15); border:1px solid rgba(34,197,94,.4); color:#86efac; }
+    .alert-info   { background:rgba(245,158,11,.15); border:1px solid rgba(245,158,11,.4); color:#fcd34d; }
+
+    .token-display {
+      background:var(--dark);
+      border:1px dashed var(--accent);
+      border-radius:2px;
+      padding:16px;
+      text-align:center;
+      margin-bottom:20px;
+      display:none;
+    }
+    .token-display p { font-size:11px; color:var(--muted); margin-bottom:6px; letter-spacing:1px; text-transform:uppercase; }
+    .token-display span {
+      font-family:'IBM Plex Mono',monospace;
+      font-size:22px; font-weight:600;
+      color:var(--accent); letter-spacing:6px;
+    }
+
+    .panel { display:none; }
+    .panel.active { display:block; }
+
+    .version-tag {
+      position:fixed; bottom:16px; right:16px;
+      font-family:'IBM Plex Mono',monospace;
+      font-size:10px; color:var(--muted); letter-spacing:1px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <div class="page-header">
+    <h2>Password Recovery</h2>
+    <p>Follow the steps to reset your account password.</p>
+  </div>
+
+  <!-- Step Indicators -->
+  <div class="steps">
+    <div class="step active" id="s1">1. EMAIL</div>
+    <div class="step"        id="s2">2. TOKEN</div>
+    <div class="step"        id="s3">3. RESET</div>
+  </div>
+
+  <div class="alert" id="alertBox"></div>
+
+  <!-- Panel 1: Enter Email -->
+  <div class="panel active" id="panel1">
+    <div class="field">
+      <label>Email Address</label>
+      <input type="email" id="recoveryEmail" placeholder="your@email.com" autocomplete="off"/>
+    </div>
+    <button class="btn-primary" onclick="sendToken()">SEND RESET CODE</button>
+  </div>
+
+  <!-- Panel 2: Enter Token -->
+  <div class="panel" id="panel2">
+    <div class="token-display" id="tokenDisplay">
+      <p>Your Reset Code (Simulated)</p>
+      <span id="tokenText">------</span>
+    </div>
+    <div class="field">
+      <label>Enter Reset Code</label>
+      <input type="text" id="tokenInput" placeholder="6-digit code" maxlength="6" autocomplete="off"/>
+    </div>
+    <button class="btn-primary" onclick="verifyToken()">VERIFY CODE</button>
+  </div>
+
+  <!-- Panel 3: New Password -->
+  <div class="panel" id="panel3">
+    <div class="field">
+      <label>New Password</label>
+      <input type="password" id="newPassword" placeholder="••••••••"/>
+    </div>
+    <div class="field">
+      <label>Confirm New Password</label>
+      <input type="password" id="confirmPassword" placeholder="••••••••"/>
+    </div>
+    <button class="btn-primary" onclick="resetPassword()">RESET PASSWORD</button>
+  </div>
+
+  <div class="links"><a href="login.html">← Back to Login</a></div>
+</div>
+
+<div class="version-tag">v1.0.4 — IT 120 Activity 4</div>
+
+<script>
+  DB.seedFromJSON('users.json');
+
+  let generatedToken = '';
+  let recoveredUserId = null;
+  let currentPanel = 1;
+
+  // ── Step 1: Send Token ────────────────────────────────────────
+  function sendToken() {
+    const email = document.getElementById('recoveryEmail').value.trim();
+    clearAlert();
+
+    if (!email) { showAlert('Please enter your email address.', 'error'); return; }
+
+    // SELECT * FROM tbl_users WHERE email = ?
+    const users = DB.select(MySQLConnection.TABLES.USERS, { email });
+    if (users.length === 0) {
+      showAlert('No account found with that email address.', 'error');
+      return;
+    }
+
+    recoveredUserId = users[0].id;
+
+    // Generate 6-digit token
+    generatedToken = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // INSERT token into recovery table
+    DB.insert(MySQLConnection.TABLES.RECOVERY_TOKENS, {
+      userId: recoveredUserId,
+      token: generatedToken,
+      expiresAt: Date.now() + 5 * 60 * 1000, // 5 minutes
+    });
+
+    // Show token (simulated — in real system this would be emailed)
+    document.getElementById('tokenDisplay').style.display = 'block';
+    document.getElementById('tokenText').textContent = generatedToken;
+
+    showAlert('Code generated! Copy the code above and enter it below.', 'info');
+    goToPanel(2);
+  }
+
+  // ── Step 2: Verify Token ──────────────────────────────────────
+  function verifyToken() {
+    const input = document.getElementById('tokenInput').value.trim();
+    clearAlert();
+
+    if (!input) { showAlert('Please enter the reset code.', 'error'); return; }
+
+    // SELECT * FROM tbl_recovery_tokens WHERE userId = ? AND token = ?
+    const tokens = DB.select(MySQLConnection.TABLES.RECOVERY_TOKENS, {
+      userId: recoveredUserId,
+      token: input,
+    });
+
+    if (tokens.length === 0) {
+      showAlert('Invalid code. Please try again.', 'error'); return;
+    }
+
+    const tokenRow = tokens[0];
+    if (Date.now() > tokenRow.expiresAt) {
+      showAlert('Code has expired. Please start over.', 'error'); return;
+    }
+
+    showAlert('Code verified! Set your new password.', 'success');
+    goToPanel(3);
+  }
+
+  // ── Step 3: Reset Password ────────────────────────────────────
+  function resetPassword() {
+    const np = document.getElementById('newPassword').value.trim();
+    const cp = document.getElementById('confirmPassword').value.trim();
+    clearAlert();
+
+    if (!np || !cp) { showAlert('Please fill in all fields.', 'error'); return; }
+    if (np.length < 6) { showAlert('Password must be at least 6 characters.', 'error'); return; }
+    if (np !== cp) { showAlert('Passwords do not match.', 'error'); return; }
+
+    // UPDATE tbl_users SET password = ? WHERE id = ?
+    DB.update(MySQLConnection.TABLES.USERS, { password: np }, { id: recoveredUserId });
+
+    // DELETE recovery tokens for this user
+    DB.delete(MySQLConnection.TABLES.RECOVERY_TOKENS, { userId: recoveredUserId });
+
+    showAlert('Password reset successful! Redirecting to login...', 'success');
+    setTimeout(() => window.location.href = 'login.html', 2000);
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────
+  function goToPanel(n) {
+    for (let i = 1; i <= 3; i++) {
+      document.getElementById(`panel${i}`).classList.toggle('active', i === n);
+      const step = document.getElementById(`s${i}`);
+      step.classList.remove('active', 'done');
+      if (i < n)  step.classList.add('done');
+      if (i === n) step.classList.add('active');
+    }
+    clearAlert();
+    currentPanel = n;
+  }
+
+  function showAlert(msg, type) {
+    const box = document.getElementById('alertBox');
+    box.textContent = msg;
+    box.className = `alert alert-${type}`;
+    box.style.display = 'block';
+  }
+
+  function clearAlert() {
+    const box = document.getElementById('alertBox');
+    box.style.display = 'none';
+  }
+</script>
+
+</body>
+</html>

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Firearm Borrowing — Firearm Registry</title>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600&display=swap" rel="stylesheet"/>
+  <script src="db.js"></script>
+  <script src="app-common.js"></script>
+  <link rel="stylesheet" href="app-layout.css"/>
+  <style>
+    .badge { display:inline-block; padding:2px 10px; border-radius:20px; font-family:'IBM Plex Mono',monospace; font-size:10px; font-weight:600; }
+    .badge-out { background:rgba(245,158,11,.15); color:#fbbf24; }
+    .badge-returned { background:rgba(34,197,94,.15); color:#4ade80; }
+    .badge-overdue { background:rgba(239,68,68,.15); color:#f87171; }
+  </style>
+</head>
+<body>
+<aside class="sidebar">
+  <div class="sidebar-brand"><div class="icon">FR</div><div><div class="name">FIREARM REG.</div><div class="ver">v1.0.5</div></div></div>
+  <nav class="sidebar-nav" id="sidebarNav"></nav>
+  <div class="sidebar-user">
+    <div class="user-avatar" id="sidebarAvatar"></div>
+    <div class="user-info"><div class="user-name" id="sidebarName"></div><div class="user-role" id="sidebarRole"></div></div>
+    <button class="logout-btn" onclick="logout()">⏏</button>
+  </div>
+</aside>
+<main class="main">
+  <div class="topbar"><div><div class="breadcrumb">TRANSACTIONS / BORROWING</div><h2>Firearm Borrowing</h2></div></div>
+  <div class="content">
+    <div class="toolbar">
+      <div class="search-wrap"><span class="icon">⌕</span><input type="text" id="searchInput" placeholder="Search borrow no, borrower, serial..." oninput="renderTable()"/></div>
+      <select class="filter-select" id="statusFilter" onchange="renderTable()"><option value="">All Status</option><option>Out</option><option>Returned</option><option>Overdue</option></select>
+      <button class="btn btn-primary" onclick="openModal()">+ BORROW FIREARM</button>
+    </div>
+    <div class="alert" id="mainAlert"></div>
+    <div class="table-wrap">
+      <table><thead><tr>
+        <th>Borrow No</th><th>Serial</th><th>Model</th><th>Borrower</th><th>Borrow Date</th><th>Due Date</th><th>Status</th><th>Actions</th>
+      </tr></thead><tbody id="tableBody"></tbody></table>
+    </div>
+  </div>
+</main>
+<div class="modal-overlay" id="txnModal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div class="modal-title">BORROW FIREARM</div>
+    <div class="alert" id="modalAlert"></div>
+    <div class="form-grid">
+      <div class="field"><label>Firearm (Serial)</label><select id="f_serial"></select></div>
+      <div class="field"><label>Borrower Name</label><input type="text" id="f_borrower"/></div>
+      <div class="field"><label>Borrower ID</label><input type="text" id="f_borrowerId"/></div>
+      <div class="field"><label>Borrow Date</label><input type="date" id="f_borrowDate"/></div>
+      <div class="field"><label>Due Date</label><input type="date" id="f_dueDate"/></div>
+    </div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">CANCEL</button><button class="btn btn-primary" onclick="saveBorrow()">SAVE</button></div>
+  </div>
+</div>
+<script>
+  const currentUser = initApp("borrowing");
+  const T = MySQLConnection.TABLES;
+  const INV = T.INVENTORY;
+  const BOR = T.BORROWING;
+
+  function loadSerials() {
+    const sel = document.getElementById("f_serial");
+    const avail = DB.select(INV).filter(i => i.status === "Available");
+    sel.innerHTML = '<option value="">— Select —</option>' + avail.map(i => `<option value="${i.serial}" data-model="${i.model}">${i.serial} — ${i.model}</option>`).join("");
+  }
+
+  function computeStatus(r) {
+    if (r.returnDate) return "Returned";
+    if (r.dueDate && r.dueDate < todayISO()) return "Overdue";
+    return "Out";
+  }
+
+  function getFiltered() {
+    const q = document.getElementById("searchInput").value.trim().toLowerCase();
+    const st = document.getElementById("statusFilter").value;
+    return DB.select(BOR).map(r => ({ ...r, status: computeStatus(r) })).filter(r => {
+      const mq = !q || [r.borrowNo, r.borrowerName, r.serial].join(" ").toLowerCase().includes(q);
+      const ms = !st || r.status === st;
+      return mq && ms;
+    }).reverse();
+  }
+
+  function renderTable() {
+    const rows = getFiltered();
+    const tbody = document.getElementById("tableBody");
+    if (!rows.length) { tbody.innerHTML = '<tr><td colspan="8"><div class="empty"><p>No borrowing records.</p></div></td></tr>'; return; }
+    tbody.innerHTML = rows.map(r => `<tr>
+      <td style="font-family:'IBM Plex Mono',monospace;font-weight:600">${r.borrowNo}</td>
+      <td>${r.serial}</td><td>${r.model}</td><td>${r.borrowerName}</td>
+      <td>${r.borrowDate}</td><td>${r.dueDate}</td>
+      <td><span class="badge badge-${r.status.toLowerCase()}">${r.status}</span></td>
+      <td>${r.status !== "Returned" ? `<button class="btn btn-outline" style="font-size:10px" onclick="returnItem(${r.id})">RETURN</button>` : "—"}</td>
+    </tr>`).join("");
+  }
+
+  function openModal() {
+    document.getElementById("f_borrowDate").value = todayISO();
+    const d = new Date(); d.setDate(d.getDate() + 14);
+    document.getElementById("f_dueDate").value = d.toISOString().split("T")[0];
+    loadSerials();
+    document.getElementById("txnModal").classList.add("show");
+  }
+
+  function saveBorrow() {
+    const serial = document.getElementById("f_serial").value;
+    const opt = document.getElementById("f_serial").selectedOptions[0];
+    const borrowerName = document.getElementById("f_borrower").value.trim();
+    const borrowerId = document.getElementById("f_borrowerId").value.trim();
+    const borrowDate = document.getElementById("f_borrowDate").value;
+    const dueDate = document.getElementById("f_dueDate").value;
+    if (!serial || !borrowerName || !borrowDate || !dueDate) { showAlert("modalAlert", "All fields are required.", "error"); return; }
+    DB.insert(BOR, {
+      borrowNo: nextTxnNo("BRW", BOR), serial, model: opt?.dataset.model || "", borrowerName, borrowerId,
+      borrowDate, dueDate, returnDate: "", status: "Out", issuedBy: currentUser.fullName,
+    });
+    DB.update(INV, { status: "Reserved" }, { serial });
+    showAlert("mainAlert", "Borrowing recorded.", "success");
+    closeModal(); renderTable();
+  }
+
+  function returnItem(id) {
+    const rows = DB.select(BOR, { id });
+    if (!rows.length) return;
+    const r = rows[0];
+    DB.update(BOR, { returnDate: todayISO(), status: "Returned" }, { id });
+    DB.update(INV, { status: "Available" }, { serial: r.serial });
+    showAlert("mainAlert", "Firearm returned.", "success");
+    renderTable();
+  }
+
+  function closeModal() { document.getElementById("txnModal").classList.remove("show"); }
+  document.getElementById("txnModal").addEventListener("click", e => { if (e.target.id === "txnModal") closeModal(); });
+  renderTable();
+</script>
+</body>
+</html>

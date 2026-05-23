@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Sales Transaction — Firearm Registry</title>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600&display=swap" rel="stylesheet"/>
+  <script src="db.js"></script>
+  <script src="app-common.js"></script>
+  <link rel="stylesheet" href="app-layout.css"/>
+</head>
+<body>
+<aside class="sidebar">
+  <div class="sidebar-brand"><div class="icon">FR</div><div><div class="name">FIREARM REG.</div><div class="ver">v1.0.5</div></div></div>
+  <nav class="sidebar-nav" id="sidebarNav"></nav>
+  <div class="sidebar-user">
+    <div class="user-avatar" id="sidebarAvatar"></div>
+    <div class="user-info"><div class="user-name" id="sidebarName"></div><div class="user-role" id="sidebarRole"></div></div>
+    <button class="logout-btn" onclick="logout()">⏏</button>
+  </div>
+</aside>
+<main class="main">
+  <div class="topbar"><div><div class="breadcrumb">TRANSACTIONS / SALES</div><h2>Sales Transaction</h2></div></div>
+  <div class="content">
+    <div class="toolbar">
+      <div class="search-wrap"><span class="icon">⌕</span><input type="text" id="searchInput" placeholder="Search sale no, buyer, serial..." oninput="renderTable()"/></div>
+      <button class="btn btn-primary" onclick="openModal()">+ NEW SALE</button>
+    </div>
+    <div class="alert" id="mainAlert"></div>
+    <div class="table-wrap">
+      <table><thead><tr>
+        <th>Sale No</th><th>Date</th><th>Serial</th><th>Model</th><th>Buyer</th><th>Amount</th><th>Processed By</th><th>Actions</th>
+      </tr></thead><tbody id="tableBody"></tbody></table>
+    </div>
+  </div>
+</main>
+<div class="modal-overlay" id="txnModal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div class="modal-title" id="modalTitle">NEW SALE</div>
+    <div class="alert" id="modalAlert"></div>
+    <div class="form-grid">
+      <div class="field"><label>Firearm (Serial)</label><select id="f_serial"></select></div>
+      <div class="field"><label>Sale Date</label><input type="date" id="f_date"/></div>
+      <div class="field"><label>Buyer Name</label><input type="text" id="f_buyer"/></div>
+      <div class="field"><label>License No</label><input type="text" id="f_license"/></div>
+      <div class="field"><label>Amount (USD)</label><input type="number" id="f_amount" step="0.01"/></div>
+    </div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">CANCEL</button><button class="btn btn-primary" onclick="saveSale()">SAVE</button></div>
+  </div>
+</div>
+<script>
+  const currentUser = initApp("sales");
+  const T = MySQLConnection.TABLES;
+  const INV = T.INVENTORY;
+  const SALES = T.SALES;
+  let editingId = null;
+
+  function loadSerials() {
+    const sel = document.getElementById("f_serial");
+    const avail = DB.select(INV).filter(i => i.status === "Available" || i.status === "Reserved");
+    sel.innerHTML = '<option value="">— Select —</option>' + avail.map(i =>
+      `<option value="${i.serial}" data-model="${i.model}" data-price="${i.price}">${i.serial} — ${i.model}</option>`
+    ).join("");
+  }
+
+  function getFiltered() {
+    const q = document.getElementById("searchInput").value.trim().toLowerCase();
+    return DB.select(SALES).filter(r => !q || [r.saleNo, r.buyerName, r.serial, r.model].join(" ").toLowerCase().includes(q)).reverse();
+  }
+
+  function renderTable() {
+    const rows = getFiltered();
+    const tbody = document.getElementById("tableBody");
+    if (!rows.length) { tbody.innerHTML = '<tr><td colspan="8"><div class="empty"><div class="icon">◎</div><p>No sales records.</p></div></td></tr>'; return; }
+    tbody.innerHTML = rows.map(r => `<tr>
+      <td style="font-family:'IBM Plex Mono',monospace;font-weight:600">${r.saleNo}</td>
+      <td>${r.saleDate}</td><td>${r.serial}</td><td>${r.model}</td><td>${r.buyerName}</td>
+      <td style="font-family:'IBM Plex Mono',monospace">$${parseFloat(r.amount).toFixed(2)}</td>
+      <td style="font-size:12px;color:var(--muted)">${r.processedBy}</td>
+      <td><button class="icon-btn del" onclick="deleteSale(${r.id})">✕</button></td>
+    </tr>`).join("");
+  }
+
+  function openModal() {
+    editingId = null;
+    document.getElementById("modalTitle").textContent = "NEW SALE";
+    document.getElementById("f_date").value = todayISO();
+    document.getElementById("f_buyer").value = "";
+    document.getElementById("f_license").value = "";
+    document.getElementById("f_amount").value = "";
+    loadSerials();
+    document.getElementById("txnModal").classList.add("show");
+  }
+
+  document.getElementById("f_serial").addEventListener("change", function() {
+    const opt = this.selectedOptions[0];
+    if (opt?.dataset.price) document.getElementById("f_amount").value = opt.dataset.price;
+  });
+
+  function saveSale() {
+    const serial = document.getElementById("f_serial").value;
+    const opt = document.getElementById("f_serial").selectedOptions[0];
+    const saleDate = document.getElementById("f_date").value;
+    const buyerName = document.getElementById("f_buyer").value.trim();
+    const buyerLicense = document.getElementById("f_license").value.trim();
+    const amount = parseFloat(document.getElementById("f_amount").value);
+    if (!serial || !saleDate || !buyerName || isNaN(amount)) { showAlert("modalAlert", "Serial, date, buyer, and amount are required.", "error"); return; }
+    const model = opt?.dataset.model || "";
+    DB.insert(SALES, {
+      saleNo: nextTxnNo("SAL", SALES), saleDate, serial, model, buyerName, buyerLicense, amount,
+      processedBy: currentUser.fullName,
+    });
+    DB.update(INV, { status: "Sold" }, { serial });
+    showAlert("mainAlert", "Sale recorded. Inventory updated to Sold.", "success");
+    closeModal(); renderTable();
+  }
+
+  function deleteSale(id) {
+    if (!confirm("Delete this sale record?")) return;
+    DB.delete(SALES, { id }); showAlert("mainAlert", "Sale deleted.", "success"); renderTable();
+  }
+  function closeModal() { document.getElementById("txnModal").classList.remove("show"); }
+  document.getElementById("txnModal").addEventListener("click", e => { if (e.target.id === "txnModal") closeModal(); });
+  renderTable();
+</script>
+</body>
+</html>

@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Report Generation — Firearm Registry</title>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600&display=swap" rel="stylesheet"/>
+  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="db.js"></script>
+  <script src="app-common.js"></script>
+  <script src="excel-reports.js"></script>
+  <link rel="stylesheet" href="app-layout.css"/>
+  <style>
+    .datagrid-wrap { border:1px solid var(--border); border-radius:3px; overflow:auto; max-height:520px; }
+    .datagrid-wrap thead th { position:sticky; top:0; z-index:1; background:#1a2744; cursor:pointer; }
+    .datagrid-wrap thead th.sorted-asc::after { content:" ▲"; font-size:8px; }
+    .datagrid-wrap thead th.sorted-desc::after { content:" ▼"; font-size:8px; }
+    .datagrid-wrap tbody tr:nth-child(even) { background:rgba(255,255,255,.02); }
+    .datagrid-wrap tbody tr:hover { background:rgba(29,78,216,.08); }
+    .export-panel { background:var(--card); border:1px solid var(--border); border-radius:3px; padding:16px 20px; margin-bottom:20px; display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end; }
+    .export-panel .field { min-width:200px; }
+    .export-panel .field label { display:block; font-size:10px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; color:var(--muted); margin-bottom:6px; }
+    .export-panel select, .export-panel input[type="date"] { width:100%; background:var(--dark); border:1px solid var(--border); border-radius:2px; padding:9px 12px; color:var(--text); font-family:'IBM Plex Mono',monospace; font-size:12px; }
+  </style>
+</head>
+<body>
+<aside class="sidebar">
+  <div class="sidebar-brand"><div class="icon">FR</div><div><div class="name">FIREARM REG.</div><div class="ver">v1.0.5</div></div></div>
+  <nav class="sidebar-nav" id="sidebarNav"></nav>
+  <div class="sidebar-user">
+    <div class="user-avatar" id="sidebarAvatar"></div>
+    <div class="user-info"><div class="user-name" id="sidebarName"></div><div class="user-role" id="sidebarRole"></div></div>
+    <button class="logout-btn" onclick="logout()">⏏</button>
+  </div>
+</aside>
+<main class="main">
+  <div class="topbar"><div><div class="breadcrumb">REPORTS / GENERATION</div><h2>Report Generation</h2></div></div>
+  <div class="content">
+    <div class="report-tabs">
+      <button class="report-tab active" data-type="sales" onclick="switchReport('sales')">Sales Report</button>
+      <button class="report-tab" data-type="borrowing" onclick="switchReport('borrowing')">Borrowing Report</button>
+      <button class="report-tab" data-type="inventory-count" onclick="switchReport('inventory-count')">Inventory Count Report</button>
+    </div>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:20px;">
+      Data Grid lists transaction records. Export generates an MS Excel workbook (Sheet 1: data with company header, logo, and signature placeholders; Sheet 2: chart graph).
+    </p>
+
+    <div class="export-panel">
+      <div class="field">
+        <label>Report Signatory</label>
+        <select id="signatorySelect"></select>
+      </div>
+      <div class="field">
+        <label>Date From</label>
+        <input type="date" id="dateFrom" onchange="renderGrid()"/>
+      </div>
+      <div class="field">
+        <label>Date To</label>
+        <input type="date" id="dateTo" onchange="renderGrid()"/>
+      </div>
+      <button class="btn btn-success" onclick="exportExcel()">↓ EXPORT TO EXCEL</button>
+    </div>
+
+    <div class="datagrid-toolbar">
+      <span class="datagrid-info" id="gridInfo">0 records</span>
+      <div class="search-wrap" style="max-width:280px"><span class="icon">⌕</span><input type="text" id="gridSearch" placeholder="Filter records..." oninput="renderGrid()"/></div>
+    </div>
+    <div class="alert" id="mainAlert"></div>
+    <div class="table-wrap datagrid-wrap">
+      <table><thead id="gridHead"></thead><tbody id="gridBody"></tbody></table>
+    </div>
+    <div style="display:flex;gap:6px;margin-top:16px;justify-content:flex-end;align-items:center">
+      <span class="datagrid-info" id="pageInfo"></span>
+      <button class="btn btn-outline" id="prevPg" onclick="prevPage()">← Prev</button>
+      <button class="btn btn-outline" id="nextPg" onclick="nextPage()">Next →</button>
+    </div>
+  </div>
+</main>
+<script>
+  const currentUser = initApp("reports");
+  const T = MySQLConnection.TABLES;
+  let activeType = "sales";
+  let page = 1;
+  const PAGE = 10;
+  let sortKey = null;
+  let sortAsc = true;
+
+  const REPORT_CONFIG = {
+    sales: {
+      title: "Sales Transaction Report",
+      file: "Sales_Report.xlsx",
+      dateKey: "saleDate",
+      chartType: "bar",
+      columns: [
+        { key: "saleNo", header: "Sale No", width: 14 },
+        { key: "saleDate", header: "Date", width: 12 },
+        { key: "serial", header: "Serial", width: 14 },
+        { key: "model", header: "Model", width: 18 },
+        { key: "buyerName", header: "Buyer", width: 20 },
+        { key: "buyerLicense", header: "License", width: 14 },
+        { key: "amount", header: "Amount", width: 12, value: r => "$" + parseFloat(r.amount).toFixed(2) },
+        { key: "processedBy", header: "Processed By", width: 18 },
+      ],
+      load: () => DB.select(T.SALES).reverse(),
+      chart: rows => {
+        const byMonth = {};
+        rows.forEach(r => {
+          const m = (r.saleDate || "").slice(0, 7) || "Unknown";
+          byMonth[m] = (byMonth[m] || 0) + (parseFloat(r.amount) || 0);
+        });
+        const labels = Object.keys(byMonth).sort();
+        return { labels, values: labels.map(l => Math.round(byMonth[l] * 100) / 100), chartTitle: "Sales Revenue by Month" };
+      },
+    },
+    borrowing: {
+      title: "Firearm Borrowing Report",
+      file: "Borrowing_Report.xlsx",
+      dateKey: "borrowDate",
+      chartType: "doughnut",
+      columns: [
+        { key: "borrowNo", header: "Borrow No", width: 14 },
+        { key: "serial", header: "Serial", width: 14 },
+        { key: "model", header: "Model", width: 18 },
+        { key: "borrowerName", header: "Borrower", width: 20 },
+        { key: "borrowDate", header: "Borrow Date", width: 12 },
+        { key: "dueDate", header: "Due Date", width: 12 },
+        { key: "status", header: "Status", width: 12 },
+        { key: "issuedBy", header: "Issued By", width: 18 },
+      ],
+      load: () => DB.select(T.BORROWING).map(r => ({
+        ...r,
+        status: r.returnDate ? "Returned" : (r.dueDate && r.dueDate < todayISO() ? "Overdue" : "Out"),
+      })).reverse(),
+      chart: rows => {
+        const counts = { Out: 0, Returned: 0, Overdue: 0 };
+        rows.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1; });
+        return { labels: Object.keys(counts), values: Object.values(counts), chartTitle: "Borrowing Status Distribution" };
+      },
+    },
+    "inventory-count": {
+      title: "Inventory Count Report",
+      file: "Inventory_Count_Report.xlsx",
+      dateKey: "countDate",
+      chartType: "bar",
+      columns: [
+        { key: "countNo", header: "Count No", width: 14 },
+        { key: "countDate", header: "Date", width: 12 },
+        { key: "serial", header: "Serial", width: 14 },
+        { key: "model", header: "Model", width: 18 },
+        { key: "systemQty", header: "System Qty", width: 12 },
+        { key: "physicalQty", header: "Physical Qty", width: 12 },
+        { key: "variance", header: "Variance", width: 10 },
+        { key: "countedBy", header: "Counted By", width: 18 },
+      ],
+      load: () => DB.select(T.INVENTORY_COUNT).reverse(),
+      chart: rows => {
+        const match = rows.filter(r => r.variance === 0).length;
+        const variance = rows.length - match;
+        return { labels: ["Matched", "Variance"], values: [match, variance], chartTitle: "Count Accuracy Summary" };
+      },
+    },
+  };
+
+  function loadSignatories() {
+    const sel = document.getElementById("signatorySelect");
+    const users = DB.select(T.USERS).filter(u => u.status === "Active");
+    sel.innerHTML = users.map(u =>
+      `<option value="${u.id}"${u.id === currentUser.id ? " selected" : ""}>${u.fullName} (${u.role})</option>`
+    ).join("");
+  }
+
+  function getSignatory() {
+    const id = parseInt(document.getElementById("signatorySelect").value, 10);
+    return DB.select(T.USERS, { id })[0] || currentUser;
+  }
+
+  function switchReport(type) {
+    activeType = type;
+    page = 1;
+    sortKey = null;
+    document.querySelectorAll(".report-tab").forEach(t => t.classList.toggle("active", t.dataset.type === type));
+    renderGrid();
+  }
+
+  function getRows() {
+    const cfg = REPORT_CONFIG[activeType];
+    const q = document.getElementById("gridSearch").value.trim().toLowerCase();
+    const from = document.getElementById("dateFrom").value;
+    const to = document.getElementById("dateTo").value;
+    let rows = cfg.load();
+    if (from || to) {
+      rows = rows.filter(r => {
+        const d = r[cfg.dateKey] || "";
+        if (from && d < from) return false;
+        if (to && d > to) return false;
+        return true;
+      });
+    }
+    if (q) rows = rows.filter(r => JSON.stringify(r).toLowerCase().includes(q));
+    if (sortKey) {
+      rows = [...rows].sort((a, b) => {
+        const va = String(a[sortKey] ?? "").toLowerCase();
+        const vb = String(b[sortKey] ?? "").toLowerCase();
+        return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+      });
+    }
+    return rows;
+  }
+
+  function renderGrid() {
+    const cfg = REPORT_CONFIG[activeType];
+    const rows = getRows();
+    const total = rows.length;
+    const pages = Math.ceil(total / PAGE) || 1;
+    if (page > pages) page = pages;
+    const slice = rows.slice((page - 1) * PAGE, page * PAGE);
+
+    const head = document.getElementById("gridHead");
+    head.innerHTML = "<tr>" + cfg.columns.map(c => {
+      const cls = sortKey === c.key ? (sortAsc ? " sorted-asc" : " sorted-desc") : "";
+      return `<th class="${cls.trim()}" onclick="sortGrid('${c.key}')">${c.header}</th>`;
+    }).join("") + "</tr>";
+
+    const body = document.getElementById("gridBody");
+    if (!slice.length) {
+      body.innerHTML = `<tr><td colspan="${cfg.columns.length}"><div class="empty"><p>No records for this report. Add transactions or clear date filters.</p></div></td></tr>`;
+    } else {
+      body.innerHTML = slice.map(r => "<tr>" + cfg.columns.map(c => {
+        const v = typeof c.value === "function" ? c.value(r) : (r[c.key] ?? "—");
+        return `<td>${v}</td>`;
+      }).join("") + "</tr>").join("");
+    }
+
+    document.getElementById("gridInfo").textContent = `${total} record${total !== 1 ? "s" : ""} — ${cfg.title}`;
+    document.getElementById("pageInfo").textContent = `Page ${page} of ${pages}`;
+    document.getElementById("prevPg").disabled = page <= 1;
+    document.getElementById("nextPg").disabled = page >= pages;
+  }
+
+  function sortGrid(key) {
+    if (sortKey === key) sortAsc = !sortAsc;
+    else { sortKey = key; sortAsc = true; }
+    renderGrid();
+  }
+
+  function prevPage() { if (page > 1) { page--; renderGrid(); } }
+  function nextPage() {
+    const pages = Math.ceil(getRows().length / PAGE) || 1;
+    if (page < pages) { page++; renderGrid(); }
+  }
+
+  async function exportExcel() {
+    const cfg = REPORT_CONFIG[activeType];
+    const rows = getRows();
+    if (!rows.length) { showAlert("mainAlert", "No data to export.", "error"); return; }
+    const chart = cfg.chart(rows);
+    const signatory = getSignatory();
+    try {
+      await exportExcelReport({
+        reportTitle: cfg.title,
+        sheetName: "Report",
+        columns: cfg.columns,
+        rows,
+        signatory,
+        chartLabels: chart.labels,
+        chartValues: chart.values,
+        chartTitle: chart.chartTitle,
+        chartType: cfg.chartType,
+        fileName: cfg.file,
+      });
+      showAlert("mainAlert", `Excel report downloaded (${cfg.file}).`, "success");
+    } catch (e) {
+      console.error(e);
+      showAlert("mainAlert", "Export failed: " + e.message, "error");
+    }
+  }
+
+  loadSignatories();
+  renderGrid();
+</script>
+</body>
+</html>

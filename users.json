@@ -1,0 +1,35 @@
+[
+  {
+    "id": 1,
+    "username": "admin",
+    "password": "admin123",
+    "email": "admin@firearmsregistry.gov",
+    "fullName": "System Administrator",
+    "role": "Admin",
+    "status": "Active",
+    "createdAt": "2025-01-01",
+    "avatar": "SA"
+  },
+  {
+    "id": 2,
+    "username": "jdoe",
+    "password": "pass1234",
+    "email": "jdoe@firearmsregistry.gov",
+    "fullName": "John Doe",
+    "role": "Officer",
+    "status": "Active",
+    "createdAt": "2025-03-15",
+    "avatar": "JD"
+  },
+  {
+    "id": 3,
+    "username": "mcruz",
+    "password": "maria456",
+    "email": "mcruz@firearmsregistry.gov",
+    "fullName": "Maria Cruz",
+    "role": "Staff",
+    "status": "Inactive",
+    "createdAt": "2025-04-10",
+    "avatar": "MC"
+  }
+]
